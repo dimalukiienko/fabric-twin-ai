@@ -22,7 +22,8 @@ A ChatGPT-style layout (shadcn/ui sidebar) with two resizable panels:
 The LineGraph, simulation metrics and improvement proposals are produced by the
 agent's tools and mirrored here as TypeScript types in `lib/types/`
 (`line-graph.ts`, `simulation.ts`, `improvement.ts`) — keep these in sync with
-the Python Pydantic models in `apps/agent`.
+the Python Pydantic models in `apps/agent`. Edges can include `routing_weight`
+to show how flow is split across multiple outgoing routes.
 
 ## How a turn works
 

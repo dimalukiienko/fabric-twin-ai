@@ -10,14 +10,16 @@ Everything derives from one structured model — the **LineGraph** — which liv
 in the agent's state as the single source of truth (`LineState.line_graph`).
 
 - `line_graph.py` — the Pydantic schema. `LineNode` (id, type, `cycle_time_s`,
-  `parallelism`, `scrap_rate`, `buffer_capacity`), `LineEdge` (material flow),
-  and `LineGraph` (nodes, edges, `units`, optional `demand_rate_per_hr`,
+  `parallelism`, `scrap_rate`, `buffer_capacity`), `LineEdge` (material flow,
+  optional `transport_time_s` and `routing_weight` for OR-splits), and `LineGraph`
+  (nodes, edges, `units`, optional `demand_rate_per_hr`,
   `assumptions`). Node/edge ids are validated for uniqueness and referential
   integrity. Keep this in sync with the TS mirror at
   `apps/web/lib/types/line-graph.ts`.
 - `simulation.py` — a [SimPy](https://simpy.readthedocs.io) discrete-event
   simulation. Each station is a resource with capacity = `parallelism` and
-  service time = `cycle_time_s`; parts flow along the edges and may be scrapped.
+  service time = `cycle_time_s`; parts flow along the edges, choose among
+  multiple outgoing routes by `routing_weight` (equal split if omitted), and may be scrapped.
   Over an 8-hour shift (with a warm-up discard) it measures per-station
   utilization, time-average queue length and throughput, the line throughput,
   and the bottleneck. Runs in two modes:

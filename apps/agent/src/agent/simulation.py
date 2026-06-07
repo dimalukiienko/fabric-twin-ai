@@ -44,6 +44,9 @@ class SimulationResult(BaseModel):
     node_metrics: list[NodeMetric] = Field(default_factory=list)
 
 
+type Route = tuple[str, float]
+
+
 def _entrance(graph: LineGraph) -> str | None:
     """Where parts enter: an explicit source, else any node with no inflow."""
     targets = {e.target for e in graph.edges}
@@ -61,9 +64,9 @@ def simulate(graph: LineGraph, horizon_s: float = HORIZON_S) -> SimulationResult
         return SimulationResult(line_throughput_per_hr=0.0)
 
     nodes = {n.id: n for n in graph.nodes}
-    adjacency: dict[str, list[str]] = {n.id: [] for n in graph.nodes}
+    adjacency: dict[str, list[Route]] = {n.id: [] for n in graph.nodes}
     for e in graph.edges:
-        adjacency[e.source].append(e.target)
+        adjacency[e.source].append((e.target, e.routing_weight or 1.0))
 
     start = _entrance(graph)
     warmup = horizon_s * WARMUP_FRACTION
@@ -112,8 +115,7 @@ def simulate(graph: LineGraph, horizon_s: float = HORIZON_S) -> SimulationResult
                 if wip is not None:
                     yield wip.put(1)
                 return
-            succ = adjacency.get(node_id) or []
-            node_id = succ[0] if succ else None
+            node_id = choose_successor(adjacency.get(node_id) or [], rng)
             hops += 1
         if env.now >= warmup:
             completed += 1
@@ -167,3 +169,19 @@ def simulate(graph: LineGraph, horizon_s: float = HORIZON_S) -> SimulationResult
         horizon_s=horizon_s,
         node_metrics=metrics,
     )
+
+
+def choose_successor(routes: list[Route], rng: random.Random) -> str | None:
+    if not routes:
+        return None
+    if len(routes) == 1:
+        return routes[0][0]
+
+    total = sum(weight for _, weight in routes)
+    threshold = rng.random() * total
+    cumulative = 0.0
+    for target, weight in routes:
+        cumulative += weight
+        if threshold <= cumulative:
+            return target
+    return routes[-1][0]

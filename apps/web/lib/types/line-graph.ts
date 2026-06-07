@@ -29,6 +29,7 @@ export type LineEdge = {
   source: string; // upstream node id
   target: string; // downstream node id
   transport_time_s?: number | null;
+  routing_weight?: number | null; // relative split share when source has multiple outgoing routes
 };
 
 export type LineGraph = {

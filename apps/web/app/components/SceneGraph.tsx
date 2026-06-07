@@ -14,6 +14,8 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { layoutLineGraph } from "@/lib/line-layout";
+import type { LayoutPoint } from "@/lib/line-layout";
 import type { LineGraph, LineNode, NodeType } from "@/lib/types/line-graph";
 import type { NodeMetric, SimulationResult } from "@/lib/types/simulation";
 import type { ChangeComparison, NodeChange } from "@/lib/types/improvement";
@@ -29,39 +31,20 @@ const TYPE_STYLE: Record<NodeType, { bg: string; border: string; label: string }
   sink: { bg: "#fef2f2", border: "#ef4444", label: "Sink" },
 };
 
-const COL_WIDTH = 220;
-const ROW_HEIGHT = 130;
-
 type StationData = { node: LineNode; metric?: NodeMetric; changed?: boolean };
+type HandleSide = "left" | "right" | "top" | "bottom";
 
-/** Assign each node a column from its longest path depth, rows within a column. */
-function layout(graph: LineGraph): Map<string, { x: number; y: number }> {
-  const depth = new Map<string, number>(graph.nodes.map((n) => [n.id, 0]));
+const HIDDEN_HANDLE_STYLE = {
+  opacity: 0,
+  pointerEvents: "none",
+} as const;
 
-  // Relax depths; cap iterations so a cycle can't loop forever.
-  const maxIter = graph.nodes.length + 1;
-  for (let i = 0; i < maxIter; i++) {
-    let changed = false;
-    for (const e of graph.edges) {
-      const next = (depth.get(e.source) ?? 0) + 1;
-      if (next > (depth.get(e.target) ?? 0)) {
-        depth.set(e.target, next);
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
-
-  const rowCursor = new Map<number, number>();
-  const pos = new Map<string, { x: number; y: number }>();
-  for (const n of graph.nodes) {
-    const col = depth.get(n.id) ?? 0;
-    const row = rowCursor.get(col) ?? 0;
-    rowCursor.set(col, row + 1);
-    pos.set(n.id, { x: col * COL_WIDTH, y: row * ROW_HEIGHT });
-  }
-  return pos;
-}
+const HANDLE_POSITION: Record<HandleSide, Position> = {
+  left: Position.Left,
+  right: Position.Right,
+  top: Position.Top,
+  bottom: Position.Bottom,
+};
 
 function StationNode({ data }: NodeProps) {
   const { node, metric, changed } = data as StationData;
@@ -83,7 +66,24 @@ function StationNode({ data }: NodeProps) {
       }}
       className="relative min-w-[150px] rounded-lg border-2 px-3 py-2 text-xs shadow-sm"
     >
-      <Handle type="target" position={Position.Left} />
+      {(["left", "right", "top", "bottom"] as const).map((side) => (
+        <Handle
+          key={`target-${side}`}
+          id={`target-${side}`}
+          type="target"
+          position={HANDLE_POSITION[side]}
+          style={HIDDEN_HANDLE_STYLE}
+        />
+      ))}
+      {(["left", "right", "top", "bottom"] as const).map((side) => (
+        <Handle
+          key={`source-${side}`}
+          id={`source-${side}`}
+          type="source"
+          position={HANDLE_POSITION[side]}
+          style={HIDDEN_HANDLE_STYLE}
+        />
+      ))}
       {bottleneck && (
         <span className="absolute -top-2 left-2 rounded bg-red-500 px-1 text-[9px] font-bold uppercase text-white">
           Bottleneck
@@ -132,7 +132,6 @@ function StationNode({ data }: NodeProps) {
           )}
         </div>
       )}
-      <Handle type="source" position={Position.Right} />
     </div>
   );
 }
@@ -159,26 +158,35 @@ export default function SceneGraph({
 
   const { nodes, edges } = useMemo(() => {
     if (!activeGraph) return { nodes: [] as Node[], edges: [] as Edge[] };
-    const pos = layout(activeGraph);
+    const pos = layoutLineGraph(activeGraph);
     const metrics = new Map(
       (activeSim?.node_metrics ?? []).map((m) => [m.node_id, m]),
     );
-    const nodes: Node[] = activeGraph.nodes.map((n) => ({
-      id: n.id,
-      type: "station",
-      position: pos.get(n.id) ?? { x: 0, y: 0 },
-      data: {
-        node: n,
-        metric: metrics.get(n.id),
-        changed: changedIds.has(n.id),
-      } satisfies StationData,
-    }));
-    const edges: Edge[] = activeGraph.edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      markerEnd: { type: MarkerType.ArrowClosed },
-    }));
+    const nodes: Node[] = activeGraph.nodes.map((n) => {
+      const position = pos.get(n.id) ?? { x: 0, y: 0 };
+      return {
+        id: n.id,
+        type: "station",
+        position,
+        data: {
+          node: n,
+          metric: metrics.get(n.id),
+          changed: changedIds.has(n.id),
+        } satisfies StationData,
+      };
+    });
+    const edges: Edge[] = activeGraph.edges.map((e) => {
+      const handles = edgeHandles(pos.get(e.source), pos.get(e.target));
+      return {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: "smoothstep",
+        sourceHandle: `source-${handles.source}`,
+        targetHandle: `target-${handles.target}`,
+        markerEnd: { type: MarkerType.ArrowClosed },
+      };
+    });
     return { nodes, edges };
   }, [activeGraph, activeSim, changedIds]);
 
@@ -267,6 +275,26 @@ export default function SceneGraph({
       )}
     </ReactFlow>
   );
+}
+
+function edgeHandles(
+  source?: LayoutPoint,
+  target?: LayoutPoint,
+): { source: HandleSide; target: HandleSide } {
+  if (!source || !target) return { source: "right", target: "left" };
+
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { source: "right", target: "left" }
+      : { source: "left", target: "right" };
+  }
+
+  return dy >= 0
+    ? { source: "bottom", target: "top" }
+    : { source: "top", target: "bottom" };
 }
 
 // One line per patched field, e.g. "Pack: machines ×1 → ×2".

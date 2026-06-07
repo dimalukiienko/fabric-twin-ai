@@ -9,7 +9,7 @@ An agent that turns a plain-language description of a production line into a
 **digital twin**. The load-bearing decision: the 2D/3D scene and the simulation
 are **never generated independently** — both derive from one structured model,
 the **LineGraph** (nodes = stations, edges = material flows, params = cycle
-times / parallelism / scrap / buffers).
+times / parallelism / scrap / buffers / routing weights).
 
 The LineGraph lives in the agent's LangGraph state (`LineState.line_graph`) —
 that is the single source of truth at runtime. See the package READMEs for
@@ -20,7 +20,8 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
 
 ### Agent (`apps/agent`)
 - **LineGraph schema** (`line_graph.py`) — Pydantic model with id/referential
-  integrity validation. Single source of truth.
+  integrity validation. Single source of truth. Edges support optional
+  `routing_weight` for OR-splits; omitted weights split outgoing flow evenly.
 - **`build_line_graph` tool** — extracts the line from plain language and writes
   it to state via a `Command` (+ named ToolMessage). Re-called in full (never a
   diff) when the user corrects the line.
@@ -28,7 +29,8 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
   runs a **SimPy discrete-event simulation** (`simulation.py`). Saturated CONWIP
   mode finds max throughput + bottleneck; open mode (when `demand_rate_per_hr`
   is set) checks demand attainment. Returns per-station utilization / throughput
-  / avg-queue.
+  / avg-queue. Multiple outgoing edges are routed by `routing_weight` (relative
+  shares such as 30/70 or 10/90); if no weights are provided, routes split evenly.
 - **Improvement loop** (`improvements.py`) — proposals are **patches**
   (`NodeChange`), not whole graphs.
   - `simulate_change(changes, rationale)` — what-if: simulates baseline +
@@ -43,6 +45,10 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
 - **Live scene** — stations colored by role, per-station load bars, bottleneck
   flagged red, a throughput/bottleneck overlay panel, and a blue "Proposed"
   preview of pending what-if changes with the before/after delta.
+- **Optimized 2D layout** — `lib/line-layout.ts` computes a layered layout with
+  row ordering for splits/merges, cycle-safe SCC handling, compact 4-column
+  snake wrapping for long lines, smoothstep edges, and per-edge side handles so
+  links attach from the correct direction.
 - **`/api/chat` bridge** (`route.ts`) — authenticates, runs the agent, extracts
   the latest `build_line_graph` / `run_simulation` / `simulate_change` tool
   results, and returns them as `graph` / `simulation` / `comparison`.
@@ -62,7 +68,7 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
 | 1 | Extract description → LineGraph | ✅ Done |
 | 2 | Confirm the line with the user | ✅ Done |
 | 3 | Render the scene (2D React Flow) | ✅ Done |
-| 4 | 2D layout optimization | ❌ Not built |
+| 4 | 2D layout optimization | ✅ Done — layered row packing + snake wrap + routed handles |
 | 5 | 3D asset library | ❌ Not built |
 | 6 | Bind simulation to scene objects | 🟡 Partial — metrics shown in 2D, not yet bound to 3D objects |
 | 7 | Discrete-event simulation engine | ✅ Done |
@@ -71,17 +77,13 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
 
 ## What needs to be added (next up)
 
-1. **Step 4 — 2D layout optimization.** The current `layout()` in
-   `SceneGraph.tsx` is a simple longest-path column assignment. Improve edge
-   routing / row packing so larger lines (splits, merges, parallel branches)
-   stay readable.
-2. **Step 5 — 3D asset library.** A catalog of station meshes keyed by
+1. **Step 5 — 3D asset library.** A catalog of station meshes keyed by
    `NodeType`, so the scene can render in 3D instead of (or alongside) the 2D
    flow diagram.
-3. **Step 6 — bind simulation to 3D.** Drive 3D object state (busy/idle, queue
+2. **Step 6 — bind simulation to 3D.** Drive 3D object state (busy/idle, queue
    length, bottleneck highlight) from `SimulationResult`, the way the 2D nodes
    already are.
-4. **Shared schema package.** LineGraph / SimulationResult / NodeChange are each
+3. **Shared schema package.** LineGraph / SimulationResult / NodeChange are each
    defined **twice** and synced by hand (Pydantic in `apps/agent`, TS in
    `apps/web/lib/types`). Extract a shared source (codegen or a shared package)
    to remove the drift risk.
@@ -98,6 +100,10 @@ detail: [`apps/agent/README.md`](apps/agent/README.md),
 - Simulation metrics and what-if comparisons are **transient**: returned to the
   web but not persisted, and cleared when a session is reopened or the line is
   rebuilt. Only the versioned LineGraph is persisted.
+- `routing_weight` models **OR-splits** only (each unit chooses one outgoing
+  route). It is a relative weight, not necessarily a percent: 0.3/0.7, 30/70,
+  and 3/7 are equivalent. Do not use it for true AND-splits where every unit
+  must go through multiple branches and synchronize later.
 - Three Pydantic↔TS mirror pairs must stay in sync:
   `line_graph.py`↔`line-graph.ts`, `simulation.py`↔`simulation.ts`,
   `improvements.py`↔`improvement.ts`.

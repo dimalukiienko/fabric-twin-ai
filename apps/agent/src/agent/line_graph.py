@@ -47,6 +47,14 @@ class LineEdge(BaseModel):
     transport_time_s: float | None = Field(
         default=None, description="Seconds to move a unit along this flow."
     )
+    routing_weight: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Relative share of flow to this edge when the source has multiple "
+            "outgoing routes. If omitted, outgoing routes split evenly."
+        ),
+    )
 
 
 class LineGraph(BaseModel):
