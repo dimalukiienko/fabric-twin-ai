@@ -12,8 +12,11 @@ apps/
 ## How it works
 
 ```
-ChatWidget (browser)  ->  /api/chat (Next.js route)  ->  LangGraph server  ->  OpenAI + tool
+Chat UI (browser)  ->  /api/chat (Next.js route)  ->  LangGraph server  ->  OpenAI + tool
 ```
+
+The web UI is a ChatGPT-style layout (shadcn/ui sidebar) listing the signed-in
+user's past sessions, with the conversation in the main panel.
 
 The agent is a `create_agent` (OpenAI `gpt-4o-mini`) served by the
 `langgraph dev` server. The Next.js API route calls it via
@@ -57,6 +60,6 @@ cd apps/web   && pnpm dev                  # terminal 2
 ```
 
 Open http://localhost:3000. You'll be redirected to `/auth/login` — sign in
-with Google or email/password, then click the chat bubble and ask
-*"What time is it in Tokyo?"*. Conversations are stored per user in Supabase;
-use the 🕘 button to revisit past sessions and ＋ to start a new one.
+with Google or email/password, then ask *"What time is it in Tokyo?"*.
+Conversations are stored per user in Supabase; pick a past chat from the
+sidebar or hit **New chat** to start a fresh one.
