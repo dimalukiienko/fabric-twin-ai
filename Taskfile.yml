@@ -1,0 +1,24 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install agent + web dependencies
+    cmds:
+      - cd apps/agent && uv sync
+      - cd apps/web && pnpm install
+
+  agent:
+    desc: Run the LangGraph agent dev server (http://localhost:2024)
+    dir: apps/agent
+    cmds:
+      - uv run langgraph dev
+
+  web:
+    desc: Run the Next.js web app (http://localhost:3000)
+    dir: apps/web
+    cmds:
+      - pnpm dev
+
+  dev:
+    desc: Run agent + web together
+    deps: [agent, web]
