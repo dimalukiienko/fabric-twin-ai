@@ -22,15 +22,30 @@ create table if not exists public.messages (
   created_at  timestamptz not null default now()
 );
 
+-- A `line_graph` is the structured production-line model the agent emits for a
+-- session: the single source of truth the scene (and later, simulation) derive
+-- from. Rows are versioned so the future before/after improvement loop keeps a
+-- history; the latest version is the current line.
+create table if not exists public.line_graphs (
+  id          uuid primary key default gen_random_uuid(),
+  session_id  uuid not null references public.chat_sessions (id) on delete cascade,
+  version     integer not null default 1,
+  graph       jsonb not null,
+  created_at  timestamptz not null default now()
+);
+
 create index if not exists chat_sessions_user_id_idx
   on public.chat_sessions (user_id, updated_at desc);
 create index if not exists messages_session_id_idx
   on public.messages (session_id, created_at);
+create index if not exists line_graphs_session_id_idx
+  on public.line_graphs (session_id, version desc);
 
 -- Row Level Security -------------------------------------------------------
 
 alter table public.chat_sessions enable row level security;
 alter table public.messages enable row level security;
+alter table public.line_graphs enable row level security;
 
 -- Sessions: owner-only access.
 create policy "own sessions - select"
@@ -65,5 +80,24 @@ create policy "own messages - insert"
     exists (
       select 1 from public.chat_sessions s
       where s.id = messages.session_id and s.user_id = auth.uid()
+    )
+  );
+
+-- Line graphs: access allowed only when the parent session belongs to the user.
+create policy "own line_graphs - select"
+  on public.line_graphs for select
+  using (
+    exists (
+      select 1 from public.chat_sessions s
+      where s.id = line_graphs.session_id and s.user_id = auth.uid()
+    )
+  );
+
+create policy "own line_graphs - insert"
+  on public.line_graphs for insert
+  with check (
+    exists (
+      select 1 from public.chat_sessions s
+      where s.id = line_graphs.session_id and s.user_id = auth.uid()
     )
   );

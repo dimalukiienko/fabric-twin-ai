@@ -1,6 +1,9 @@
 import { Client } from "@langchain/langgraph-sdk";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import type { LineGraph } from "@/lib/types/line-graph";
+import type { SimulationResult } from "@/lib/types/simulation";
+import type { ChangeComparison } from "@/lib/types/improvement";
 
 // URL of the running `langgraph dev` server (see apps/agent).
 const apiUrl = process.env.LANGGRAPH_API_URL ?? "http://localhost:2024";
@@ -81,10 +84,22 @@ export async function POST(request: Request) {
       input: { messages: [{ role: "human", content: message }] },
     });
 
-    const messages = (state as { messages?: Array<{ type?: string; content?: unknown }> })
-      .messages;
+    const messages = (
+      state as {
+        messages?: Array<{ type?: string; name?: string; content?: unknown }>;
+      }
+    ).messages;
     const last = messages?.[messages.length - 1];
     const reply = contentToText(last?.content);
+
+    // The agent emits the structured line as a `build_line_graph` tool result.
+    // Pull the latest one this turn; an absent/malformed graph just means the
+    // model didn't (re)build the line, which is fine.
+    const graph = extractLineGraph(messages);
+    // Likewise, a `run_simulation` tool result carries this turn's metrics.
+    const simulation = extractSimulation(messages);
+    // A `simulate_change` tool result carries a before/after proposal.
+    const comparison = extractComparison(messages);
 
     // Persist the assistant reply and bump the session's recency.
     await supabase
@@ -95,7 +110,31 @@ export async function POST(request: Request) {
       .update({ updated_at: new Date().toISOString() })
       .eq("id", sessionId);
 
-    return NextResponse.json({ sessionId, threadId, reply });
+    // Store the new graph as the next version for this session.
+    if (graph) {
+      const { data: latest } = await supabase
+        .from("line_graphs")
+        .select("version")
+        .eq("session_id", sessionId)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      await supabase.from("line_graphs").insert({
+        session_id: sessionId,
+        version: (latest?.version ?? 0) + 1,
+        graph,
+      });
+    }
+
+    return NextResponse.json({
+      sessionId,
+      threadId,
+      reply,
+      graph: graph ?? null,
+      simulation: simulation ?? null,
+      comparison: comparison ?? null,
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
@@ -103,6 +142,68 @@ export async function POST(request: Request) {
       { status: 502 },
     );
   }
+}
+
+// Find the most recent `build_line_graph` tool result and parse it into a
+// LineGraph. Returns null when the agent didn't emit one this turn or the
+// payload can't be parsed.
+function extractLineGraph(
+  messages: Array<{ type?: string; name?: string; content?: unknown }> | undefined,
+): LineGraph | null {
+  if (!messages) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type !== "tool" || m.name !== "build_line_graph") continue;
+    try {
+      const parsed = JSON.parse(contentToText(m.content));
+      if (parsed && Array.isArray(parsed.nodes)) return parsed as LineGraph;
+    } catch {
+      // Malformed tool output — ignore and keep looking.
+    }
+  }
+  return null;
+}
+
+// Find the most recent `run_simulation` tool result and parse it into a
+// SimulationResult. Returns null when the agent didn't simulate this turn.
+function extractSimulation(
+  messages: Array<{ type?: string; name?: string; content?: unknown }> | undefined,
+): SimulationResult | null {
+  if (!messages) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type !== "tool" || m.name !== "run_simulation") continue;
+    try {
+      const parsed = JSON.parse(contentToText(m.content));
+      if (parsed && Array.isArray(parsed.node_metrics)) {
+        return parsed as SimulationResult;
+      }
+    } catch {
+      // Malformed tool output — ignore and keep looking.
+    }
+  }
+  return null;
+}
+
+// Find the most recent `simulate_change` tool result and parse it into a
+// ChangeComparison. Returns null when no proposal was made this turn.
+function extractComparison(
+  messages: Array<{ type?: string; name?: string; content?: unknown }> | undefined,
+): ChangeComparison | null {
+  if (!messages) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type !== "tool" || m.name !== "simulate_change") continue;
+    try {
+      const parsed = JSON.parse(contentToText(m.content));
+      if (parsed && parsed.variant_graph && parsed.variant) {
+        return parsed as ChangeComparison;
+      }
+    } catch {
+      // Malformed tool output — ignore and keep looking.
+    }
+  }
+  return null;
 }
 
 // LangChain message content can be a string or a list of content blocks.

@@ -10,6 +10,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import SceneGraph from "@/app/components/SceneGraph";
+import type { LineGraph } from "@/lib/types/line-graph";
+import type { SimulationResult } from "@/lib/types/simulation";
+import type { ChangeComparison } from "@/lib/types/improvement";
 import {
   Sidebar,
   SidebarContent,
@@ -39,7 +43,9 @@ type Session = {
 
 const WELCOME: Message = {
   role: "assistant",
-  content: "Hi! Ask me what time it is anywhere.",
+  content:
+    "Hi! Describe your production line — the steps parts go through and how " +
+    "many machines at each — and I'll lay it out as a flow on the right.",
 };
 
 export default function ChatApp({
@@ -56,6 +62,9 @@ export default function ChatApp({
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
+  const [lineGraph, setLineGraph] = useState<LineGraph | null>(null);
+  const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [comparison, setComparison] = useState<ChangeComparison | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   function scrollToBottom() {
@@ -73,20 +82,35 @@ export default function ChatApp({
   }
 
   async function openSession(id: string) {
-    const { data } = await supabase
-      .from("messages")
-      .select("role, content")
-      .eq("session_id", id)
-      .order("created_at", { ascending: true });
+    const [{ data: msgs }, { data: graphRow }] = await Promise.all([
+      supabase
+        .from("messages")
+        .select("role, content")
+        .eq("session_id", id)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("line_graphs")
+        .select("graph")
+        .eq("session_id", id)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
     setSessionId(id);
-    setMessages(data && data.length > 0 ? (data as Message[]) : [WELCOME]);
+    setMessages(msgs && msgs.length > 0 ? (msgs as Message[]) : [WELCOME]);
+    setLineGraph((graphRow?.graph as LineGraph) ?? null);
+    setSimulation(null); // metrics are transient — re-run to see them again
+    setComparison(null);
     scrollToBottom();
   }
 
   function newChat() {
     setSessionId(undefined);
     setMessages([WELCOME]);
+    setLineGraph(null);
+    setSimulation(null);
+    setComparison(null);
     setInput("");
   }
 
@@ -114,6 +138,17 @@ export default function ChatApp({
         ...prev,
         { role: "assistant", content: data.reply || "(no response)" },
       ]);
+      // A committed/rebuilt line supersedes any pending proposal.
+      if (data.graph) {
+        setLineGraph(data.graph as LineGraph);
+        setComparison(null);
+      }
+      // A fresh what-if proposal takes over the scene.
+      if (data.comparison) setComparison(data.comparison as ChangeComparison);
+      // Show fresh metrics; if the line was rebuilt without a re-sim, the old
+      // metrics are stale, so clear them.
+      if (data.simulation) setSimulation(data.simulation as SimulationResult);
+      else if (data.graph) setSimulation(null);
       loadSessions();
     } catch (err) {
       const detail = err instanceof Error ? err.message : "Something went wrong";
@@ -237,7 +272,7 @@ export default function ChatApp({
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && send()}
-                  placeholder="What time is it in Tokyo?"
+                  placeholder="Describe your line: cut → weld → paint → pack…"
                 />
                 <Button onClick={send} disabled={loading} size="icon">
                   <Send className="size-4" />
@@ -249,9 +284,11 @@ export default function ChatApp({
           <ResizableHandle withHandle />
 
           <ResizablePanel defaultSize="50%" minSize="20%">
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Factory Layout Scene
-            </div>
+            <SceneGraph
+              graph={lineGraph}
+              simulation={simulation}
+              comparison={comparison}
+            />
           </ResizablePanel>
         </ResizablePanelGroup>
       </SidebarInset>

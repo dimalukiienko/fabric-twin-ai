@@ -13,6 +13,7 @@
     "@langchain/langgraph-sdk": "^1.9.17",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.49.4",
+    "@xyflow/react": "^12.11.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
