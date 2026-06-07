@@ -7,7 +7,16 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
-import { LogOut, MessageSquare, Plus, Send } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  GitBranch,
+  LogOut,
+  MessageSquare,
+  Plus,
+  Send,
+  type LucideIcon,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -79,7 +88,7 @@ function ChatComposer({
       }`}
     >
       <div
-        className={`relative rounded-lg border border-input bg-background transition-all duration-200 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30 ${
+        className={`relative rounded-lg border border-input bg-white transition-all duration-200 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-background ${
           loading ? "opacity-70" : ""
         }`}
       >
@@ -113,6 +122,110 @@ function resizeTextarea(ref: RefObject<HTMLTextAreaElement | null>) {
 
   textarea.style.height = "auto";
   textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+}
+
+type FlowStep = {
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  tone: string;
+};
+
+const EMPTY_FLOW_STEPS: FlowStep[] = [
+  {
+    icon: MessageSquare,
+    title: "Describe",
+    detail: "Tell the agent the stations, machines, routes, and constraints.",
+    tone: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300",
+  },
+  {
+    icon: GitBranch,
+    title: "Build LineGraph",
+    detail: "The line becomes one structured model and a live flow diagram.",
+    tone: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300",
+  },
+  {
+    icon: Activity,
+    title: "Simulate",
+    detail: "Run throughput, find bottlenecks, and preview validated changes.",
+    tone: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300",
+  },
+];
+
+const EXAMPLE_PROMPTS = [
+  "Parts are cut, welded, painted, and packed with one machine at each step.",
+  "Inspect splits parts 70/30, then both routes merge at pack.",
+  "Two welders, one painter, target 60 parts/hour.",
+  "Find the bottleneck and suggest one validated improvement.",
+];
+
+function EmptyFlowIllustration() {
+  return (
+    <div
+      aria-label="Description to LineGraph to simulation and improvements"
+      className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-3 text-left md:grid-cols-[1fr_auto_1fr_auto_1fr]"
+    >
+      {EMPTY_FLOW_STEPS.map((step, index) => (
+        <FlowStepCard key={step.title} index={index} step={step} />
+      ))}
+    </div>
+  );
+}
+
+function ExamplePrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
+  return (
+    <div className="mx-auto mt-3 flex w-full max-w-4xl flex-wrap justify-center gap-2 px-4">
+      {EXAMPLE_PROMPTS.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onSelect(prompt)}
+          className="max-w-full rounded-lg border bg-muted px-3 py-2 text-left text-xs whitespace-nowrap text-muted-foreground transition-all duration-150 hover:-translate-y-0.5 hover:border-ring hover:bg-background hover:text-foreground hover:shadow-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none max-sm:whitespace-normal dark:bg-muted/60"
+        >
+          {prompt}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FlowStepCard({ index, step }: { index: number; step: FlowStep }) {
+  const Icon = step.icon;
+
+  return (
+    <>
+      {index > 0 && (
+        <div
+          aria-hidden="true"
+          className="hidden items-center justify-center text-muted-foreground md:flex"
+        >
+          <ArrowRight className="size-5" />
+        </div>
+      )}
+      <div className="relative overflow-hidden rounded-lg border bg-muted/60 p-3 shadow-sm dark:bg-muted/40">
+        <div className="flex items-start gap-3">
+          <div
+            className={`flex size-10 shrink-0 items-center justify-center rounded-lg border ${step.tone}`}
+          >
+            <Icon className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
+                {index + 1}
+              </span>
+              <h2 className="text-sm font-semibold text-foreground">
+                {step.title}
+              </h2>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {step.detail}
+            </p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
 
 export default function ChatApp({
@@ -246,17 +359,34 @@ export default function ChatApp({
     <div className="flex h-full flex-col">
       <div
         ref={scrollRef}
-        className={`flex-1 overflow-y-auto ${isEmptyChat ? "flex items-center" : ""}`}
+        className={`flex-1 overflow-y-auto ${
+          isEmptyChat ? "flex items-center bg-muted/40 dark:bg-muted/20" : ""
+        }`}
       >
         {isEmptyChat ? (
-          <div className="w-full -translate-y-10 animate-in fade-in-0 zoom-in-95 duration-300">
-            <ChatComposer
-              value={input}
-              onChange={setInput}
-              onSend={send}
-              loading={loading}
-              centered
-            />
+          <div className="w-full -translate-y-8 animate-in fade-in-0 zoom-in-95 duration-300">
+            <div className="mx-auto max-w-5xl rounded-lg px-4 py-8">
+              <div className="mx-auto mb-6 max-w-2xl px-4 text-center">
+                <h1 className="text-xl font-semibold tracking-normal text-foreground md:text-2xl">
+                  From line description to validated twin
+                </h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  One structured model drives the diagram, simulation, and
+                  improvement preview.
+                </p>
+                <div className="mt-6">
+                  <EmptyFlowIllustration />
+                </div>
+              </div>
+              <ChatComposer
+                value={input}
+                onChange={setInput}
+                onSend={send}
+                loading={loading}
+                centered
+              />
+              <ExamplePrompts onSelect={setInput} />
+            </div>
           </div>
         ) : (
           <div className="mx-auto max-w-2xl space-y-4 p-4">
