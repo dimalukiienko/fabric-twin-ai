@@ -123,12 +123,15 @@ def simulate(graph: LineGraph, horizon_s: float = HORIZON_S) -> SimulationResult
             yield wip.put(1)
 
     def source_closed():
+        assert wip is not None
         while True:
             yield wip.get(1)
             env.process(part_proc(start))
 
     def source_open():
-        interarrival = 3600.0 / graph.demand_rate_per_hr
+        demand_rate_per_hr = graph.demand_rate_per_hr
+        assert demand_rate_per_hr is not None
+        interarrival = 3600.0 / demand_rate_per_hr
         while True:
             yield env.timeout(interarrival)
             env.process(part_proc(start))

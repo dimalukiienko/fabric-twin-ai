@@ -36,8 +36,9 @@ in the agent's state as the single source of truth (`LineState.line_graph`).
 
 ## The graph
 
-`graph.py` wires it together with `create_agent` (OpenAI `gpt-4o-mini`) and a
-`LineState` that carries the LineGraph. Four tools:
+`graph.py` is the composition root: it wires the model, system prompt, state
+schema and tools together with `create_agent` (OpenAI `gpt-4o-mini`). `LineState`
+carries the LineGraph, and the four tools live in `tools.py`:
 
 | Tool | What it does |
 | --- | --- |
@@ -63,7 +64,11 @@ vars are optional. The Next.js app in `apps/web` calls this server over the
 
 ```
 src/agent/
-  graph.py         create_agent + the four tools + system prompt
+  graph.py         create_agent composition root
+  model.py         ChatOpenAI configuration
+  prompts.py       system prompt
+  state.py         LineState schema
+  tools.py         LangChain tools exposed to the agent
   line_graph.py    LineGraph schema (single source of truth)
   simulation.py    SimPy discrete-event simulation
   improvements.py  patch / compare / apply improvement loop
