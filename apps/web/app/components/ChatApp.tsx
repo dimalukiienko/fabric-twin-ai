@@ -6,6 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -192,47 +197,63 @@ export default function ChatApp({
           <span className="truncate text-sm font-medium">{activeTitle}</span>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-2xl space-y-4 p-4">
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={m.role === "user" ? "text-right" : "text-left"}
-              >
-                <span
-                  className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
-                    m.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
-                  }`}
-                >
-                  {m.content}
-                </span>
+        <ResizablePanelGroup orientation="horizontal" className="flex-1">
+          <ResizablePanel
+            defaultSize="50%"
+            minSize="30%"
+            className="flex h-full flex-col"
+          >
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
+              <div className="mx-auto max-w-2xl space-y-4 p-4">
+                {messages.map((m, i) => (
+                  <div
+                    key={i}
+                    className={m.role === "user" ? "text-right" : "text-left"}
+                  >
+                    <span
+                      className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ${
+                        m.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground"
+                      }`}
+                    >
+                      {m.content}
+                    </span>
+                  </div>
+                ))}
+                {loading && (
+                  <div className="text-left">
+                    <span className="inline-block rounded-2xl bg-muted px-4 py-2 text-sm text-muted-foreground">
+                      thinking…
+                    </span>
+                  </div>
+                )}
               </div>
-            ))}
-            {loading && (
-              <div className="text-left">
-                <span className="inline-block rounded-2xl bg-muted px-4 py-2 text-sm text-muted-foreground">
-                  thinking…
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        <div className="shrink-0 border-t p-4">
-          <div className="mx-auto flex max-w-2xl gap-2">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && send()}
-              placeholder="What time is it in Tokyo?"
-            />
-            <Button onClick={send} disabled={loading} size="icon">
-              <Send className="size-4" />
-            </Button>
-          </div>
-        </div>
+            <div className="shrink-0 border-t p-4">
+              <div className="mx-auto flex max-w-2xl gap-2">
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && send()}
+                  placeholder="What time is it in Tokyo?"
+                />
+                <Button onClick={send} disabled={loading} size="icon">
+                  <Send className="size-4" />
+                </Button>
+              </div>
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          <ResizablePanel defaultSize="50%" minSize="20%">
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              Factory Layout Scene
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </SidebarInset>
     </SidebarProvider>
   );
