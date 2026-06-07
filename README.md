@@ -19,13 +19,26 @@ The agent is a `create_agent` (OpenAI `gpt-4o-mini`) served by the
 `langgraph dev` server. The Next.js API route calls it via
 `@langchain/langgraph-sdk`.
 
+Auth and chat history live entirely in the Next.js app via **Supabase**: the
+`/api/chat` route authenticates the user, then persists each message and reply
+to the `chat_sessions` / `messages` tables. The Python agent is unchanged — the
+LangGraph `thread_id` is just stored alongside each session.
+
 ## Setup
 
 1. **Agent key** — copy `apps/agent/.env.example` to `apps/agent/.env` and set
    `OPENAI_API_KEY`.
 2. **Web env** — copy `apps/web/.env.example` to `apps/web/.env.local`
-   (defaults point at `http://localhost:2024`).
-3. **Install** — `task install` (or run the two install commands below).
+   (LangGraph defaults point at `http://localhost:2024`).
+3. **Supabase** — create a project, then:
+   - Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
+     `apps/web/.env.local` (Supabase dashboard → Settings → API).
+   - Run `apps/web/supabase/schema.sql` in the SQL editor to create the
+     `chat_sessions` / `messages` tables with Row Level Security.
+   - Auth → Providers: enable **Email** (with confirmations) and **Google**.
+   - Auth → URL Configuration: add `http://localhost:3000/auth/callback` as a
+     redirect URL.
+4. **Install** — `task install` (or run the two install commands below).
 
 ## Run
 
@@ -43,5 +56,7 @@ cd apps/agent && uv run langgraph dev      # terminal 1
 cd apps/web   && pnpm dev                  # terminal 2
 ```
 
-Open http://localhost:3000, click the chat bubble, and ask
-*"What time is it in Tokyo?"*.
+Open http://localhost:3000. You'll be redirected to `/auth/login` — sign in
+with Google or email/password, then click the chat bubble and ask
+*"What time is it in Tokyo?"*. Conversations are stored per user in Supabase;
+use the 🕘 button to revisit past sessions and ＋ to start a new one.

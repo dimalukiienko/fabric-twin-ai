@@ -1,5 +1,6 @@
 import { Client } from "@langchain/langgraph-sdk";
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 // URL of the running `langgraph dev` server (see apps/agent).
 const apiUrl = process.env.LANGGRAPH_API_URL ?? "http://localhost:2024";
@@ -7,10 +8,19 @@ const assistantId = process.env.LANGGRAPH_ASSISTANT_ID ?? "agent";
 
 type ChatRequest = {
   message?: string;
-  threadId?: string;
+  sessionId?: string;
 };
 
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   let body: ChatRequest;
   try {
     body = await request.json();
@@ -26,8 +36,45 @@ export async function POST(request: Request) {
   const client = new Client({ apiUrl });
 
   try {
-    // Reuse the caller's thread so the agent keeps conversation context.
-    const threadId = body.threadId ?? (await client.threads.create()).thread_id;
+    // Resolve the chat session: reuse the caller's, or create a new one
+    // backed by a fresh LangGraph thread. RLS guarantees the session row,
+    // when present, belongs to the current user.
+    let sessionId = body.sessionId;
+    let threadId: string;
+
+    if (sessionId) {
+      const { data: session } = await supabase
+        .from("chat_sessions")
+        .select("id, thread_id")
+        .eq("id", sessionId)
+        .single();
+
+      if (!session) {
+        return NextResponse.json({ error: "Unknown session" }, { status: 404 });
+      }
+      threadId = session.thread_id ?? (await client.threads.create()).thread_id;
+    } else {
+      threadId = (await client.threads.create()).thread_id;
+      const { data: session, error } = await supabase
+        .from("chat_sessions")
+        .insert({
+          user_id: user.id,
+          thread_id: threadId,
+          title: message.slice(0, 60),
+        })
+        .select("id")
+        .single();
+
+      if (error || !session) {
+        throw new Error(error?.message ?? "Failed to create session");
+      }
+      sessionId = session.id;
+    }
+
+    // Persist the user's message before running the agent.
+    await supabase
+      .from("messages")
+      .insert({ session_id: sessionId, role: "user", content: message });
 
     // Run the agent to completion and read the final state.
     const state = await client.runs.wait(threadId, assistantId, {
@@ -37,8 +84,18 @@ export async function POST(request: Request) {
     const messages = (state as { messages?: Array<{ type?: string; content?: unknown }> })
       .messages;
     const last = messages?.[messages.length - 1];
+    const reply = contentToText(last?.content);
 
-    return NextResponse.json({ threadId, reply: contentToText(last?.content) });
+    // Persist the assistant reply and bump the session's recency.
+    await supabase
+      .from("messages")
+      .insert({ session_id: sessionId, role: "assistant", content: reply });
+    await supabase
+      .from("chat_sessions")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", sessionId);
+
+    return NextResponse.json({ sessionId, threadId, reply });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
