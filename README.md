@@ -1,31 +1,60 @@
 # fabric-twin-ai
 
-A minimal LangGraph agent with a Next.js chat widget. The agent answers
-questions about the current time by calling a `get_current_time` tool.
+A digital twin for production lines. Describe a line in plain language — the
+steps parts go through and how many machines at each — and a LangGraph agent
+turns it into a structured model, simulates its throughput and bottleneck, and
+proposes validated improvements. A Next.js app shows the line as a live flow
+diagram next to the chat.
 
 ```
 apps/
-  agent/   LangGraph agent (Python) — OpenAI + get_current_time tool
-  web/     Next.js chat widget that talks to the agent
+  agent/   LangGraph agent (Python) — builds + simulates + improves the line
+  web/     Next.js chat + flow-diagram UI, with Supabase auth and persistence
 ```
 
 ## How it works
 
 ```
-Chat UI (browser)  ->  /api/chat (Next.js route)  ->  LangGraph server  ->  OpenAI + tool
+Chat UI (browser)  ->  /api/chat (Next.js)  ->  LangGraph server  ->  OpenAI + tools
+      ^                                                                     |
+      |  line graph + simulation metrics + before/after proposals          |
+      +---------------------------------------------------------------------+
 ```
 
-The web UI is a ChatGPT-style layout (shadcn/ui sidebar) listing the signed-in
-user's past sessions, with the conversation in the main panel.
+The agent is a manufacturing-process engineer. Everything derives from one
+structured model — the **LineGraph** — which lives in the agent's state as the
+single source of truth: nodes are stations (operations, inspections, buffers,
+source/sink) with cycle times, parallelism and scrap; edges are material flows.
 
-The agent is a `create_agent` (OpenAI `gpt-4o-mini`) served by the
-`langgraph dev` server. The Next.js API route calls it via
-`@langchain/langgraph-sdk`.
+Four tools drive the loop:
 
-Auth and chat history live entirely in the Next.js app via **Supabase**: the
-`/api/chat` route authenticates the user, then persists each message and reply
-to the `chat_sessions` / `messages` tables. The Python agent is unchanged — the
-LangGraph `thread_id` is just stored alongside each session.
+- **`build_line_graph`** — turns the user's description into the LineGraph and
+  writes it to state (also re-built whenever the user corrects the line).
+- **`run_simulation`** — a SimPy discrete-event simulation of the current line.
+  Returns per-station utilization, queue lengths and throughput, plus the line
+  throughput and the bottleneck station. Runs *saturated* (max capacity) when no
+  demand is given, *open* (arrival-driven) when a demand rate is set.
+- **`simulate_change`** — a what-if: applies a patch (add a parallel machine,
+  speed up a station, cut scrap, enlarge a buffer) to a copy of the line and
+  returns a before/after throughput comparison. No proposal is asserted without
+  a number behind it.
+- **`apply_change`** — commits an accepted proposal so it becomes the new
+  baseline.
+
+The web UI is a ChatGPT-style layout (shadcn/ui sidebar) with the conversation
+on the left and a resizable scene on the right. The scene renders the LineGraph
+as a React Flow diagram: stations colored by role, per-station load bars, the
+bottleneck flagged in red, and any pending proposal previewed in blue with its
+throughput delta.
+
+Auth and history live in the Next.js app via **Supabase**: `/api/chat`
+authenticates the user, runs the agent, then persists each message, the reply,
+and every version of the line to the `chat_sessions` / `messages` /
+`line_graphs` tables (all under Row Level Security). The LangGraph `thread_id`
+is stored alongside each session.
+
+See [`apps/agent/README.md`](apps/agent/README.md) and
+[`apps/web/README.md`](apps/web/README.md) for per-app detail.
 
 ## Setup
 
@@ -37,7 +66,7 @@ LangGraph `thread_id` is just stored alongside each session.
    - Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in
      `apps/web/.env.local` (Supabase dashboard → Settings → API).
    - Run `apps/web/supabase/schema.sql` in the SQL editor to create the
-     `chat_sessions` / `messages` tables with Row Level Security.
+     `chat_sessions` / `messages` / `line_graphs` tables with Row Level Security.
    - Auth → Providers: enable **Email** (with confirmations) and **Google**.
    - Auth → URL Configuration: add `http://localhost:3000/auth/callback` as a
      redirect URL.
@@ -60,6 +89,9 @@ cd apps/web   && pnpm dev                  # terminal 2
 ```
 
 Open http://localhost:3000. You'll be redirected to `/auth/login` — sign in
-with Google or email/password, then ask *"What time is it in Tokyo?"*.
-Conversations are stored per user in Supabase; pick a past chat from the
-sidebar or hit **New chat** to start a fresh one.
+with Google or email/password, then describe a line, e.g. *"Parts are cut, then
+welded by two welders, painted, inspected, and packed."* Ask *"What's the
+throughput and where's the bottleneck?"* to simulate it, then *"How do I get to
+80 parts/hour?"* to get a validated improvement. Conversations and line versions
+are stored per user in Supabase; pick a past chat from the sidebar or hit
+**New chat** to start fresh.
